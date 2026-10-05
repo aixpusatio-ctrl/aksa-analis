@@ -1,0 +1,4 @@
+# Tailwind CSS v4 is compiled by Bun's bundler through this plugin, both for the
+# dev server (`bun run dev`) and for the static build (`bun run build`).
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

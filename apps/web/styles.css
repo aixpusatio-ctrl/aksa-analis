@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/* Tailwind v4 defaults to a media-query dark mode; this app toggles a class on
+   <html> instead so the theme can be switched from Settings. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-50: oklch(0.97 0.014 275);
+  --color-brand-100: oklch(0.94 0.03 275);
+  --color-brand-200: oklch(0.88 0.06 275);
+  --color-brand-300: oklch(0.8 0.1 275);
+  --color-brand-400: oklch(0.7 0.15 275);
+  --color-brand-500: oklch(0.62 0.19 275);
+  --color-brand-600: oklch(0.55 0.21 275);
+  --color-brand-700: oklch(0.48 0.19 275);
+  --color-brand-800: oklch(0.4 0.15 275);
+  --color-brand-900: oklch(0.33 0.11 275);
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-slate-300) transparent;
+  }
+
+  .dark * {
+    scrollbar-color: var(--color-slate-700) transparent;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* One consistent focus ring everywhere. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+
+  ::selection {
+    @apply bg-brand-500/25;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[var(--radius-card)] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300;
+  }
+
+  .field-hint {
+    @apply mt-1.5 text-xs text-slate-500 dark:text-slate-400;
+  }
+
+  .input-base {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm
+      transition placeholder:text-slate-400
+      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none
+      disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500
+      dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500
+      dark:disabled:bg-slate-900;
+  }
+}
+
+@layer utilities {
+  /* Animations used by the toast stack, modal and skeletons. */
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(400%);
+    }
+  }
+
+  .animate-toast-in {
+    animation: toast-in 0.18s ease-out;
+  }
+
+  .animate-overlay-in {
+    animation: overlay-in 0.15s ease-out;
+  }
+
+  .animate-dialog-in {
+    animation: dialog-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .animate-indeterminate {
+    animation: indeterminate 1.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-toast-in,
+    .animate-overlay-in,
+    .animate-dialog-in,
+    .animate-indeterminate {
+      animation: none;
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "web-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern web scraper with a SaaS-style dashboard, built on Bun + React + Playwright + Drizzle/SQLite",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development bun --hot apps/server/index.ts",
+    "start": "NODE_ENV=production bun apps/server/index.ts",
+    "build": "NODE_ENV=production bun run apps/server/build.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run apps/server/database/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "browsers:install": "bunx playwright-core install chromium",
+    "test": "DATABASE_PATH=:memory: bun test"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.52.0",
+    "playwright-core": "^1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "bun-plugin-tailwind": "^0.1.2",
+    "drizzle-kit": "^0.31.11",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  }
+}
