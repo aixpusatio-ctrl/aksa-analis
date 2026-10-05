@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "NODE_ENV=development bun --hot apps/server/index.ts",
     "start": "NODE_ENV=production bun apps/server/index.ts",
+    "demo": "bun apps/demo/index.ts",
+    "demo:seed": "bun apps/demo/seed.ts",
     "build": "NODE_ENV=production bun run apps/server/build.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

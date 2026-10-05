@@ -39,6 +39,8 @@ export CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium
 | `bun run dev` | Dev server on `:3000` with React fast refresh |
 | `bun run start` | Production server (bundles the client once at boot) |
 | `bun run build` | Static client bundle in `dist/`, for hosting the UI separately |
+| `bun run demo` | Sample website to scrape, on `:3100` |
+| `bun run demo:seed` | Create six ready-made scrapers for the demo site |
 | `bun run test` | Unit tests (in-memory database, never touches your data) |
 | `bun run typecheck` | `tsc --noEmit` across server, client and shared types |
 | `bun run db:generate` | Regenerate SQL migrations after a schema change |
@@ -55,6 +57,112 @@ Copy `.env.example` to `.env`. Everything has a working default.
 | `DATABASE_PATH` | `./data/scraper.db` | SQLite file; `:memory:` for a throwaway database |
 | `CHROMIUM_EXECUTABLE_PATH` | auto-detected | Use an existing Chromium instead of downloading one |
 | `CHROMIUM_NO_SANDBOX` | off (auto when running as root) | Adds `--no-sandbox`, needed in most containers |
+
+---
+
+## Try it: the demo site
+
+The repo ships with a sample website built to be scraped, so you can see every
+feature working before pointing the scraper at anything real.
+
+```bash
+bun run demo        # sample site on http://localhost:3100
+bun run dev         # the scraper app on http://localhost:3000  (second terminal)
+bun run demo:seed   # create six ready-made scrapers            (third terminal)
+```
+
+Then open http://localhost:3000, pick a demo scraper and press **Start**.
+Re-running `demo:seed` replaces the demo scrapers rather than duplicating them.
+
+### What each page is for
+
+| Page | Shape | What it demonstrates |
+| --- | --- | --- |
+| `/products?page=1` | 48 products, 8 pages | **Rendered by JavaScript** after a 250 ms delay — `curl` returns an empty grid. Numbered pager plus an `a.next` link, so it works with both URL-pattern and next-button pagination |
+| `/catalog` | Same 48 products | **Infinite scroll** — no pager; more cards load as you reach the bottom |
+| `/reviews?page=1` | 60 reviews, 5 pages | A different record shape: dates in a `datetime` attribute, a rating in `data-rating`, two links per record, and a **required** field |
+| `/jobs` | 24 rows, one page | A plain static table — the page to try **XPath** selectors on |
+| `/product/7` | One record | No item selector, so the **whole page is one record** |
+| `/admin` | — | **Disallowed in robots.txt**; the run refuses it and fails with the reason |
+| `/flaky` | — | Fails twice, then succeeds — watch the **retries** in the log |
+| `/slow?ms=8000` | — | Slow response; set a 2000 ms **timeout** to see it time out |
+| `/boom` | — | Always HTTP 500 |
+
+### The main example, field by field
+
+This is the `Demo · Products (URL pattern)` preset. To build it by hand:
+
+**Target**
+
+| Setting | Value |
+| --- | --- |
+| Target URL | `http://localhost:3100/products?page=1` |
+| Item selector | `.product` |
+| Wait for selector | `.product` — the cards appear after the page loads |
+
+**Fields**
+
+| Field name | Selector | Extract | Notes |
+| --- | --- | --- | --- |
+| `name` | `.product-name` | Text | |
+| `brand` | `.product-brand` | Text | |
+| `price` | `.product-price` | Text | |
+| `old_price` | `.product-old-price` | Text | Only every third product is discounted, so this column is often empty |
+| `rating` | `.product-rating` | Text | |
+| `image` | `img` | Image | Resolved to an absolute URL; shows as a thumbnail in the results table |
+| `url` | `a.product-link` | Link | Resolved to an absolute URL |
+| `sku` | *(empty)* | Attribute → `data-sku` | An empty selector reads the attribute off the item element itself |
+| `category` | *(empty)* | Attribute → `data-category` | |
+| `tags` | `.tag` | Text, **collect all matches** | Comes back as an array |
+
+**Pagination & pacing**
+
+| Setting | Value |
+| --- | --- |
+| Pagination | URL pattern |
+| URL pattern | `http://localhost:3100/products?page={page}` |
+| Max pages | `8` |
+| Request delay | `300` ms |
+
+That yields **48 rows across 8 pages** in about six seconds.
+
+### The other presets
+
+| Preset | Pagination | Yields |
+| --- | --- | --- |
+| `Demo · Products (URL pattern)` | `url-pattern` on `?page={page}` | 48 rows / 8 pages |
+| `Demo · Products (next button)` | `selector` on `a.next` | 48 rows / 8 pages |
+| `Demo · Catalog (infinite scroll)` | `scroll`, 10 rounds | 48 rows, duplicates dropped |
+| `Demo · Reviews` | `selector` on `a.next` | 60 rows / 5 pages |
+| `Demo · Jobs (XPath)` | none | 24 rows |
+| `Demo · Product detail` | none | 1 row |
+
+The configurations live in `apps/demo/presets.ts` — a good place to copy from
+when writing your own.
+
+### Scraping it over the API instead
+
+```bash
+curl -X POST localhost:3000/api/scrape -H 'content-type: application/json' -d '{
+  "name": "Demo products",
+  "url": "http://localhost:3100/products?page=1",
+  "itemSelector": ".product",
+  "waitForSelector": ".product",
+  "fields": [
+    { "name": "name",  "selector": ".product-name",  "type": "text" },
+    { "name": "price", "selector": ".product-price", "type": "text" },
+    { "name": "image", "selector": "img",            "type": "image" },
+    { "name": "url",   "selector": "a.product-link", "type": "link" },
+    { "name": "sku",   "selector": "", "type": "attribute", "attribute": "data-sku" }
+  ],
+  "pagination": {
+    "mode": "url-pattern",
+    "urlPattern": "http://localhost:3100/products?page={page}"
+  },
+  "maxPages": 8,
+  "requestDelayMs": 300
+}'
+```
 
 ---
 
@@ -201,6 +309,7 @@ curl -X POST localhost:3000/api/scrape -H 'content-type: application/json' -d '{
 
 ```
 apps/
+  demo/                   Sample site to scrape, plus ready-made presets
   web/                    React client
     components/           UI kit, DataTable, LogConsole, ScraperForm, FieldEditor
     pages/                Dashboard, Scrapers, Editor, Results, History, Settings
