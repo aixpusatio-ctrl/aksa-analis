@@ -53,6 +53,8 @@ export const runs = sqliteTable(
     pagesProcessed: integer("pages_processed").notNull().default(0),
     pagesPlanned: integer("pages_planned"),
     errorMessage: text("error_message"),
+    /** `test` runs stop after a handful of records; they are kept out of dataset totals. */
+    mode: text("mode").$type<"normal" | "test">().notNull().default("normal"),
     /** Frozen copy of the config, so an old run stays reproducible. */
     config: text("config", { mode: "json" }).$type<ScraperConfig>().notNull(),
     createdAt: text("created_at").notNull().default(now),
@@ -92,6 +94,33 @@ export const runLogs = sqliteTable(
   (t) => [index("run_logs_run_id_idx").on(t.runId)],
 );
 
+/**
+ * Debug artifacts for a run: screenshots, HTML snapshots, console output,
+ * network errors and the per-field selector report. The blob itself lives in
+ * the artifact store; this table holds the index.
+ */
+export const runArtifacts = sqliteTable(
+  "run_artifacts",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<"screenshot" | "html" | "console" | "network" | "selector-report">()
+      .notNull(),
+    label: text("label").notNull().default(""),
+    pageNumber: integer("page_number"),
+    pageUrl: text("page_url").notNull().default(""),
+    /** Key in the artifact store. */
+    storageKey: text("storage_key").notNull(),
+    contentType: text("content_type").notNull().default("application/octet-stream"),
+    size: integer("size").notNull().default(0),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("run_artifacts_run_id_idx").on(t.runId)],
+);
+
 /** Simple key/value store for application settings. */
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -103,3 +132,4 @@ export type ScraperRow = typeof scrapers.$inferSelect;
 export type RunRow = typeof runs.$inferSelect;
 export type ResultRecord = typeof results.$inferSelect;
 export type RunLogRow = typeof runLogs.$inferSelect;
+export type RunArtifactRow = typeof runArtifacts.$inferSelect;

@@ -1,14 +1,23 @@
 import type {
   AppSettings,
+  DetectedSchema,
   ExportFormat,
+  FieldConfig,
   LogEntry,
   Paginated,
+  PreviewResult,
   ResultRow,
   Run,
+  RunArtifact,
+  RunMode,
   RunProgress,
   RunStatus,
   Scraper,
   ScraperConfig,
+  SelectorKind,
+  SelectorTestResult,
+  SnapshotInfo,
+  WaitUntil,
 } from "@shared/types.ts";
 
 /** Same origin by default; override to point the UI at a remote API. */
@@ -107,9 +116,54 @@ export const api = {
   runLogs: (id: string, params: { limit?: number; afterId?: number } = {}) =>
     request<{ items: LogEntry[] }>(`/api/runs/${id}/logs${query(params)}`).then((body) => body.items),
 
+  runArtifacts: (id: string) =>
+    request<{ items: RunArtifact[] }>(`/api/runs/${id}/artifacts`).then((body) => body.items),
+  artifactText: (url: string) => fetch(`${API_BASE}${url}`).then((r) => r.text()),
+  artifactJson: <T>(url: string) => fetch(`${API_BASE}${url}`).then((r) => r.json() as Promise<T>),
+
+  /* Test runs ------------------------------------------------------- */
+  testScraper: (id: string, maxItems = 5) =>
+    request<{ run: Run; progress: RunProgress }>(`/api/scrapers/${id}/test`, {
+      method: "POST",
+      body: JSON.stringify({ maxItems }),
+    }),
+  testConfig: (config: Partial<ScraperConfig>, maxItems = 5) =>
+    request<{ run: Run; progress: RunProgress }>("/api/scrape/test", {
+      method: "POST",
+      body: JSON.stringify({ ...config, maxItems }),
+    }),
+
+  /* Visual inspector ------------------------------------------------ */
+  openSnapshot: (input: { url: string; waitForSelector?: string; waitUntil?: WaitUntil; timeoutMs?: number; userAgent?: string }) =>
+    request<SnapshotInfo>("/api/inspector/snapshots", { method: "POST", body: JSON.stringify(input) }),
+
+  testSelector: (input: {
+    url: string;
+    selector: string;
+    selectorKind: SelectorKind;
+    waitForSelector?: string;
+    timeoutMs?: number;
+  }) => request<SelectorTestResult>("/api/inspector/test-selector", { method: "POST", body: JSON.stringify(input) }),
+
+  previewExtraction: (input: {
+    url: string;
+    itemSelector: string;
+    itemSelectorKind: SelectorKind;
+    fields: FieldConfig[];
+    waitForSelector?: string;
+    limit?: number;
+  }) => request<PreviewResult>("/api/inspector/preview", { method: "POST", body: JSON.stringify(input) }),
+
+  detectSchema: (input: { url: string; waitForSelector?: string; timeoutMs?: number }) =>
+    request<{ url: string; schema: DetectedSchema | null }>("/api/inspector/detect", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
   /* History -------------------------------------------------------- */
-  history: (params: { page?: number; pageSize?: number; status?: RunStatus | "all"; search?: string } = {}) =>
-    request<Paginated<Run>>(`/api/history${query(params)}`),
+  history: (
+    params: { page?: number; pageSize?: number; status?: RunStatus | "all"; search?: string; mode?: RunMode | "all" } = {},
+  ) => request<Paginated<Run>>(`/api/history${query(params)}`),
 
   /* Export --------------------------------------------------------- */
   exportUrl: (runId: string, format: ExportFormat) => `${API_BASE}/api/results/${runId}/export?format=${format}`,

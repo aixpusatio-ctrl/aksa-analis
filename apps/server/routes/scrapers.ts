@@ -1,6 +1,7 @@
 import type { ScraperInput } from "@shared/types.ts";
 import { handler, json, noContent, readJson, searchParams } from "../utils/http.ts";
 import { badRequest } from "../utils/errors.ts";
+import { clampInt } from "../utils/validate.ts";
 import * as scraperService from "../services/scraper-service.ts";
 import * as runService from "../services/run-service.ts";
 import { scrapeManager } from "../scraper/manager.ts";
@@ -92,6 +93,40 @@ export const scraperRoutes = {
         search: params.get("search") ?? undefined,
       });
       return json({ ...results, runId: run.id });
+    }),
+  },
+
+  /**
+   * Test run: a capped scrape that validates a configuration cheaply, and
+   * always leaves a selector report behind.
+   */
+  "/api/scrapers/:id/test": {
+    POST: handler(async (req) => {
+      const scraper = scraperService.getScraper(req.params.id);
+      const body = await readJson<Partial<ScraperInput> & { maxItems?: number }>(req);
+      const config = scraperService.normalizeConfig({ ...scraper, ...body });
+      const run = scrapeManager.start({
+        scraperId: scraper.id,
+        config,
+        mode: "test",
+        maxItems: clampInt(body.maxItems, { min: 1, max: 100 }, 5),
+      });
+      return json({ run, progress: scrapeManager.progressFor(run.id) }, { status: 202 });
+    }),
+  },
+
+  /** Test an unsaved configuration — what the visual builder uses. */
+  "/api/scrape/test": {
+    POST: handler(async (req) => {
+      const body = await readJson<ScraperInput & { maxItems?: number }>(req);
+      const config = scraperService.normalizeConfig(body);
+      const run = scrapeManager.start({
+        scraperId: null,
+        config,
+        mode: "test",
+        maxItems: clampInt(body.maxItems, { min: 1, max: 100 }, 5),
+      });
+      return json({ run, progress: scrapeManager.progressFor(run.id) }, { status: 202 });
     }),
   },
 

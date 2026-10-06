@@ -5,6 +5,8 @@ import { scrapeManager } from "../scraper/manager.ts";
 import { exportRun, parseFormat, toDownloadResponse } from "../services/export-service.ts";
 import { listScrapers } from "../services/scraper-service.ts";
 import { openEventStream } from "./sse.ts";
+import { artifactStore } from "../storage/index.ts";
+import { notFound } from "../utils/errors.ts";
 
 const historyFromRequest = (req: Request) => {
   const params = searchParams(req);
@@ -14,6 +16,7 @@ const historyFromRequest = (req: Request) => {
     status: (params.get("status") as RunStatus | "all" | null) ?? "all",
     search: params.get("search") ?? undefined,
     scraperId: params.get("scraperId") ?? undefined,
+    mode: (params.get("mode") as "normal" | "test" | "all" | null) ?? "all",
   };
 };
 
@@ -74,6 +77,26 @@ export const runRoutes = {
           ...(afterId ? { afterId: Number.parseInt(afterId, 10) } : {}),
         }),
       });
+    }),
+  },
+
+  /** Debug artifacts captured for this run. */
+  "/api/runs/:id/artifacts": {
+    GET: handler((req) => {
+      runService.getRun(req.params.id);
+      return json({ items: runService.listArtifacts(req.params.id) });
+    }),
+  },
+
+  "/api/runs/:id/artifacts/:artifactId": {
+    GET: handler(async (req) => {
+      const params = req.params as unknown as { id: string; artifactId: string };
+      const artifact = runService.findArtifact(params.id, params.artifactId);
+      if (!artifact) throw notFound("That debug artifact does not exist");
+
+      const response = await artifactStore.response(artifact.storageKey, artifact.contentType);
+      if (!response) throw notFound("That debug artifact is no longer stored");
+      return response;
     }),
   },
 

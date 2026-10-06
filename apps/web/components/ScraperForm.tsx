@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Globe, ListTree, Play, Save, Settings2, Sparkles } from "lucide-react";
+import { FlaskConical, Globe, ListTree, Play, Save, Settings2, Sparkles } from "lucide-react";
 import type { PaginationMode, ScraperConfig, SelectorKind, WaitUntil } from "@shared/types.ts";
 import { LIMITS } from "@shared/defaults.ts";
 import { Card, CardBody, CardHeader } from "./ui/Card.tsx";
@@ -43,8 +43,10 @@ export interface ScraperFormProps {
   onChange: (next: ScraperConfig) => void;
   onSave?: () => void;
   onRun?: () => void;
+  onTest?: () => void;
   saving?: boolean;
   running?: boolean;
+  testing?: boolean;
   saveLabel?: string;
   disabled?: boolean;
 }
@@ -54,8 +56,10 @@ export function ScraperForm({
   onChange,
   onSave,
   onRun,
+  onTest,
   saving = false,
   running = false,
+  testing = false,
   saveLabel = "Save scraper",
   disabled = false,
 }: ScraperFormProps) {
@@ -393,8 +397,19 @@ export function ScraperForm({
       </Card>
 
       {/* Actions -------------------------------------------------------- */}
-      {onSave || onRun ? (
+      {onSave || onRun || onTest ? (
         <div className="sticky bottom-4 z-20 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+          {onTest ? (
+            <Button
+              onClick={onTest}
+              loading={testing}
+              disabled={disabled}
+              icon={<FlaskConical className="size-4" />}
+              title="Save, then scrape just a few records to check the configuration"
+            >
+              Test run
+            </Button>
+          ) : null}
           {onSave ? (
             <Button onClick={onSave} loading={saving} disabled={disabled} icon={<Save className="size-4" />}>
               {saveLabel}

@@ -1,4 +1,4 @@
-import type { LogLevel, Run, RunProgress, ScraperConfig } from "@shared/types.ts";
+import type { LogLevel, Run, RunMode, RunProgress, ScraperConfig } from "@shared/types.ts";
 import { ScrapeRunner, type RunSink } from "./engine.ts";
 import { eventBus } from "../utils/event-bus.ts";
 import { conflict, errorMessage, notFound } from "../utils/errors.ts";
@@ -21,13 +21,14 @@ class ScrapeManager {
   #active = new Map<string, ActiveRun>();
 
   /** Kick off a run. Resolves as soon as the run is registered, not when it ends. */
-  start(options: { scraperId: string | null; config: ScraperConfig }): Run {
+  start(options: { scraperId: string | null; config: ScraperConfig; mode?: RunMode; maxItems?: number }): Run {
     if (options.scraperId) {
       const existing = this.activeRunForScraper(options.scraperId);
       if (existing) throw conflict(`This scraper is already running (run ${existing.id})`);
     }
 
-    const run = runService.createRun({ scraperId: options.scraperId, config: options.config });
+    const mode: RunMode = options.mode ?? "normal";
+    const run = runService.createRun({ scraperId: options.scraperId, config: options.config, mode });
     let nextPosition = 0;
 
     const progress: RunProgress = {
@@ -61,6 +62,14 @@ class ScrapeManager {
         });
       },
 
+      onArtifact: (artifact) => {
+        try {
+          runService.recordArtifact({ ...artifact, runId: run.id });
+        } catch (error) {
+          console.error("[scrape] failed to record debug artifact:", error);
+        }
+      },
+
       onProgress: (update) => {
         progress.pagesProcessed = update.pagesProcessed;
         progress.totalItems = update.totalItems;
@@ -80,10 +89,15 @@ class ScrapeManager {
       },
     };
 
-    const runner = new ScrapeRunner(options.config, sink);
+    const runner = new ScrapeRunner(options.config, sink, {
+      runId: run.id,
+      // A test run is capped, and always leaves a selector report behind so
+      // the result can be understood without re-running anything.
+      ...(mode === "test" ? { maxItems: options.maxItems ?? 5, alwaysCaptureReport: true } : {}),
+    });
 
     runService.updateRun(run.id, { status: "running", startedAt: progress.startedAt });
-    const registered: Run = { ...run, status: "running", startedAt: progress.startedAt };
+    const registered: Run = { ...run, status: "running", startedAt: progress.startedAt, mode };
     emitProgress("status");
 
     const finished = this.#execute(registered, runner, sink, progress, emitProgress);

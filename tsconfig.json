@@ -22,7 +22,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
 
-    "types": ["bun"],
+    "types": ["bun", "node"],
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["./packages/shared/*"],

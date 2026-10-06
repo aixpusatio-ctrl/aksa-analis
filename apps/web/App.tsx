@@ -7,6 +7,7 @@ import { useTheme } from "./hooks/useTheme.ts";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { ScrapersPage } from "./pages/ScrapersPage.tsx";
 import { ScraperEditorPage } from "./pages/ScraperEditorPage.tsx";
+import { VisualBuilderPage } from "./pages/VisualBuilderPage.tsx";
 import { ResultsPage } from "./pages/ResultsPage.tsx";
 import { HistoryPage } from "./pages/HistoryPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
@@ -14,6 +15,7 @@ import { SettingsPage } from "./pages/SettingsPage.tsx";
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Start a scrape and watch it run" },
   scrapers: { title: "Scrapers", subtitle: "Saved scraping configurations" },
+  builder: { title: "Visual builder", subtitle: "Open a page and click what you want to extract" },
   new: { title: "New scraper", subtitle: "Describe what to extract and how to paginate" },
   results: { title: "Results", subtitle: "Browse, filter and export scraped data" },
   history: { title: "History", subtitle: "Every run, with its results kept" },
@@ -43,6 +45,8 @@ function Router() {
         return params[0]
           ? { element: <ScraperEditorPage scraperId={params[0]} navigate={navigate} />, navKey: "scrapers" }
           : { element: <ScrapersPage navigate={navigate} />, navKey: "scrapers" };
+      case "builder":
+        return { element: <VisualBuilderPage navigate={navigate} />, navKey: "builder" };
       case "new":
         return { element: <ScraperEditorPage navigate={navigate} />, navKey: "new" };
       case "results":

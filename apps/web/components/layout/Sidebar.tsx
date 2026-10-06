@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Database, Gauge, History, Plus, Settings, Table2, Workflow } from "lucide-react";
+import { Database, Gauge, History, MousePointerClick, Plus, Settings, Table2, Workflow } from "lucide-react";
 import { cx } from "../../services/cx.ts";
 
 export interface NavItem {
@@ -12,6 +12,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: <Gauge className="size-4.5" /> },
   { id: "scrapers", label: "Scrapers", icon: <Workflow className="size-4.5" /> },
+  { id: "builder", label: "Visual builder", icon: <MousePointerClick className="size-4.5" /> },
   { id: "new", label: "New scraper", icon: <Plus className="size-4.5" /> },
   { id: "results", label: "Results", icon: <Table2 className="size-4.5" /> },
   { id: "history", label: "History", icon: <History className="size-4.5" /> },

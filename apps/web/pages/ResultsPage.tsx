@@ -11,6 +11,7 @@ import { Dropdown, DropdownItem, DropdownLabel } from "../components/ui/Dropdown
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States.tsx";
 import { DataTable, cellToText } from "../components/DataTable.tsx";
 import { RunMonitor } from "../components/RunMonitor.tsx";
+import { DebugPanel } from "../components/DebugPanel.tsx";
 import { Select } from "../components/ui/Field.tsx";
 
 const EXPORTS: { format: ExportFormat; label: string; icon: React.ReactNode }[] = [
@@ -131,6 +132,8 @@ export function ResultsPage({ runId, navigate }: { runId?: string; navigate: (to
         onStop={() => void stop()}
         stopping={stopping}
       />
+
+      {!isRunning && runId ? <DebugPanel key={`${runId}-${stream.itemsVersion}`} runId={runId} /> : null}
 
       {results.error ? (
         <Card>

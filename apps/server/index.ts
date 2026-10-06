@@ -5,6 +5,7 @@ import { reconcileInterruptedRuns } from "./services/run-service.ts";
 import { scrapeManager } from "./scraper/manager.ts";
 import { browserManager } from "./scraper/browser.ts";
 import { errorResponse } from "./utils/http.ts";
+import { policyDescription } from "./security/ssrf.ts";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const isProduction = process.env.NODE_ENV === "production";
@@ -41,6 +42,7 @@ console.log(`
   Mode       ${isProduction ? "production" : "development (hot reload)"}
   Runtime    bun ${Bun.version}
   Chromium   ${browserManager.executablePath ?? "downloaded by Playwright on first run"}
+  Network    ${policyDescription()}
 `);
 
 let shuttingDown = false;

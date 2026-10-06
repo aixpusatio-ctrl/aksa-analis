@@ -19,7 +19,7 @@ import { useAsync } from "../hooks/useAsync.ts";
 import { useToast } from "../hooks/useToast.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Card } from "../components/ui/Card.tsx";
-import { StatusBadge } from "../components/ui/Badge.tsx";
+import { Badge, StatusBadge } from "../components/ui/Badge.tsx";
 import { Dropdown, DropdownItem, DropdownLabel, DropdownSeparator } from "../components/ui/Dropdown.tsx";
 import { ConfirmModal, Modal } from "../components/ui/Modal.tsx";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States.tsx";
@@ -190,6 +190,11 @@ export function HistoryPage({ navigate }: { navigate: (to: string) => void }) {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={run.status} />
+                      {run.mode === "test" ? (
+                        <Badge tone="brand" className="ml-1.5">
+                          test
+                        </Badge>
+                      ) : null}
                       {run.errorMessage ? (
                         <p className="mt-1 max-w-[16rem] truncate text-xs text-rose-600 dark:text-rose-400" title={run.errorMessage}>
                           {run.errorMessage}

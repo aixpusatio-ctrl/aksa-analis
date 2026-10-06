@@ -1,12 +1,26 @@
 import { and, asc, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import {
   db,
+  runArtifacts as runArtifactsTable,
   runLogs as runLogsTable,
   runs as runsTable,
   results as resultsTable,
+  type RunArtifactRow,
   type RunRow,
 } from "../database/index.ts";
-import type { LogEntry, LogLevel, Paginated, ResultRow, Run, RunProgress, RunStatus, ScraperConfig } from "@shared/types.ts";
+import type {
+  ArtifactKind,
+  LogEntry,
+  LogLevel,
+  Paginated,
+  ResultRow,
+  Run,
+  RunArtifact,
+  RunMode,
+  RunProgress,
+  RunStatus,
+  ScraperConfig,
+} from "@shared/types.ts";
 import { notFound } from "../utils/errors.ts";
 import { newId, nowIso } from "../utils/ids.ts";
 
@@ -25,10 +39,11 @@ function toRun(row: RunRow): Run {
     errorMessage: row.errorMessage,
     createdAt: row.createdAt,
     config: row.config,
+    mode: row.mode,
   };
 }
 
-export function createRun(input: { scraperId: string | null; config: ScraperConfig }): Run {
+export function createRun(input: { scraperId: string | null; config: ScraperConfig; mode?: RunMode }): Run {
   const id = newId();
   db.insert(runsTable)
     .values({
@@ -38,6 +53,7 @@ export function createRun(input: { scraperId: string | null; config: ScraperConf
       url: input.config.url,
       status: "queued",
       config: input.config,
+      mode: input.mode ?? "normal",
       createdAt: nowIso(),
     })
     .run();
@@ -99,6 +115,7 @@ export interface HistoryQuery {
   status?: RunStatus | "all";
   search?: string;
   scraperId?: string;
+  mode?: RunMode | "all";
 }
 
 export function listRuns(query: HistoryQuery = {}): Paginated<Run> {
@@ -108,6 +125,7 @@ export function listRuns(query: HistoryQuery = {}): Paginated<Run> {
   const filters = [];
   if (query.status && query.status !== "all") filters.push(eq(runsTable.status, query.status));
   if (query.scraperId) filters.push(eq(runsTable.scraperId, query.scraperId));
+  if (query.mode && query.mode !== "all") filters.push(eq(runsTable.mode, query.mode));
   if (query.search?.trim()) {
     const needle = `%${query.search.trim()}%`;
     filters.push(or(like(runsTable.scraperName, needle), like(runsTable.url, needle)));
@@ -327,4 +345,70 @@ export function dashboardStats(): {
     db.select({ value: count() }).from(runsTable).where(eq(runsTable.status, "failed")).get()?.value ?? 0;
 
   return { totalRuns, totalItems: Number(totalItems), activeRuns, failedRuns, savedScrapers: 0 };
+}
+
+/* ------------------------------------------------------------------ */
+/* Debug artifacts                                                    */
+/* ------------------------------------------------------------------ */
+
+function toArtifact(row: RunArtifactRow): RunArtifact {
+  return {
+    id: row.id,
+    runId: row.runId,
+    kind: row.kind,
+    label: row.label,
+    pageNumber: row.pageNumber,
+    pageUrl: row.pageUrl,
+    contentType: row.contentType,
+    size: row.size,
+    createdAt: row.createdAt,
+    url: `/api/runs/${row.runId}/artifacts/${row.id}`,
+  };
+}
+
+export function recordArtifact(input: {
+  id: string;
+  runId: string;
+  kind: ArtifactKind;
+  label?: string;
+  pageNumber?: number | null;
+  pageUrl?: string;
+  storageKey: string;
+  contentType: string;
+  size: number;
+}): void {
+  db.insert(runArtifactsTable)
+    .values({
+      id: input.id,
+      runId: input.runId,
+      kind: input.kind,
+      label: input.label ?? "",
+      pageNumber: input.pageNumber ?? null,
+      pageUrl: input.pageUrl ?? "",
+      storageKey: input.storageKey,
+      contentType: input.contentType,
+      size: input.size,
+      createdAt: nowIso(),
+    })
+    .run();
+}
+
+export function listArtifacts(runId: string): RunArtifact[] {
+  return db
+    .select()
+    .from(runArtifactsTable)
+    .where(eq(runArtifactsTable.runId, runId))
+    .orderBy(asc(runArtifactsTable.createdAt))
+    .all()
+    .map(toArtifact);
+}
+
+export function findArtifact(runId: string, artifactId: string): RunArtifactRow | null {
+  return (
+    db
+      .select()
+      .from(runArtifactsTable)
+      .where(and(eq(runArtifactsTable.runId, runId), eq(runArtifactsTable.id, artifactId)))
+      .get() ?? null
+  );
 }

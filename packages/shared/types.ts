@@ -139,6 +139,7 @@ export interface Run {
   errorMessage: string | null;
   createdAt: string;
   config: ScraperConfig;
+  mode: RunMode;
 }
 
 export interface ResultRow {
@@ -220,3 +221,103 @@ export interface ApiError {
 }
 
 export type ExportFormat = "csv" | "json" | "xlsx";
+
+/* ------------------------------------------------------------------ */
+/* Visual inspector                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface SnapshotInfo {
+  id: string;
+  url: string;
+  title: string;
+  elementCount: number;
+  robotsAllowed: boolean;
+  createdAt: string;
+  /** Same-origin path the dashboard iframes. */
+  pageUrl: string;
+}
+
+/** What the picker reports when an element is clicked in the preview. */
+export interface PickedElement {
+  ref: string | null;
+  tag: string;
+  id: string | null;
+  classes: string[];
+  /** Selector that matches this one element. */
+  css: string;
+  /** Selector generalized to match every sibling that looks the same. */
+  cssAll: string;
+  xpath: string;
+  xpathAll: string;
+  suggestedType: FieldType;
+  text: string;
+  preview: string | null;
+  countExact: number;
+  countAll: number;
+  /** The nearest repeating ancestor — the natural item for a list. */
+  itemCandidate: { selector: string; count: number; relative: string } | null;
+}
+
+export interface SelectorTestResult {
+  selector: string;
+  selectorKind: SelectorKind;
+  count: number;
+  valid: boolean;
+  error: string | null;
+  samples: string[];
+}
+
+export interface DetectedField {
+  name: string;
+  selector: string;
+  type: FieldType;
+  attribute?: string;
+  confidence: number;
+  samples: string[];
+}
+
+export interface DetectedSchema {
+  itemSelector: string;
+  itemCount: number;
+  confidence: number;
+  fields: DetectedField[];
+  alternatives: { selector: string; count: number; score: number }[];
+}
+
+export interface PreviewResult {
+  rows: Record<string, unknown>[];
+  itemCount: number;
+  matched: number;
+  warnings: string[];
+  url: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Test runs and debugging                                            */
+/* ------------------------------------------------------------------ */
+
+export type RunMode = "normal" | "test";
+
+export type ArtifactKind = "screenshot" | "html" | "console" | "network" | "selector-report";
+
+export interface RunArtifact {
+  id: string;
+  runId: string;
+  kind: ArtifactKind;
+  label: string;
+  pageNumber: number | null;
+  pageUrl: string;
+  contentType: string;
+  size: number;
+  createdAt: string;
+  /** API path that serves the blob. */
+  url: string;
+}
+
+/** Per-field match counts, the core of the debugger's "expected vs found". */
+export interface SelectorReport {
+  pageUrl: string;
+  itemSelector: string;
+  itemsFound: number;
+  fields: { name: string; selector: string; type: FieldType; found: number; sample: string | null }[];
+}

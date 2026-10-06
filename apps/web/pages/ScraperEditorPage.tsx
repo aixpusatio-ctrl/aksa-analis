@@ -21,6 +21,7 @@ export function ScraperEditorPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -82,6 +83,26 @@ export function ScraperEditorPage({
     }
   }, [persist, toast, navigate]);
 
+  const runTest = useCallback(async () => {
+    setTesting(true);
+    const id = await persist();
+    if (!id) {
+      setTesting(false);
+      return;
+    }
+    try {
+      // A test run is capped at five records and always leaves a selector
+      // report behind, so a bad configuration explains itself.
+      const { run } = await api.testScraper(id, 5);
+      toast.info("Test run started", "Capped at 5 records.");
+      navigate(`results/${run.id}`);
+    } catch (error) {
+      toast.error("Could not start the test run", error instanceof ApiError ? error.message : String(error));
+    } finally {
+      setTesting(false);
+    }
+  }, [persist, toast, navigate]);
+
   if (loadError) return <ErrorState message={loadError} onRetry={() => void load()} />;
   if (!config) return <LoadingState label="Loading configuration…" />;
 
@@ -96,8 +117,10 @@ export function ScraperEditorPage({
         onChange={setConfig}
         onSave={() => void save()}
         onRun={() => void saveAndRun()}
+        onTest={() => void runTest()}
         saving={saving}
         running={running}
+        testing={testing}
         saveLabel={scraperId ? "Save changes" : "Save scraper"}
       />
     </div>

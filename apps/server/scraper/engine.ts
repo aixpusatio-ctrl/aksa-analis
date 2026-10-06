@@ -3,6 +3,8 @@ import type { LogLevel, ScraperConfig } from "@shared/types.ts";
 import { browserManager } from "./browser.ts";
 import { countMatches, extractFromPage, type ExtractionPlan } from "./extract.ts";
 import { getRobotsPolicy, isAllowedByPolicy } from "./robots.ts";
+import { DebugRecorder, type CapturedArtifact } from "./debug.ts";
+import { assertPublicUrl, isRequestUrlAllowed } from "../security/ssrf.ts";
 import { mapWithConcurrency, sleep, withRetry } from "../utils/async.ts";
 import { errorMessage } from "../utils/errors.ts";
 
@@ -11,9 +13,22 @@ export interface RunSink {
   log(level: LogLevel, message: string): void;
   saveItems(pageNumber: number, pageUrl: string, items: Record<string, unknown>[]): void;
   onProgress(update: { pagesProcessed: number; totalItems: number; currentUrl: string | null; pagesPlanned: number | null }): void;
+  /** Debug artifacts captured on failure, or on demand in test mode. */
+  onArtifact?(artifact: CapturedArtifact): void;
+}
+
+export interface RunnerOptions {
+  /** Namespaces debug artifacts in the store. */
+  runId?: string;
+  /** Stop once this many records are collected. Used by test runs. */
+  maxItems?: number;
+  /** Capture a selector report even when the run succeeds. */
+  alwaysCaptureReport?: boolean;
 }
 
 export interface ScrapeSummary {
+  /** True when the run ended because it hit the test-mode record cap. */
+  reachedItemLimit?: boolean;
   totalItems: number;
   pagesProcessed: number;
   pagesFailed: number;
@@ -33,11 +48,27 @@ export class ScrapeRunner {
   #consecutiveFailures = 0;
   #effectiveDelayMs: number;
 
+  readonly #recorder: DebugRecorder | null;
+  #reachedItemLimit = false;
+
   constructor(
     private readonly config: ScraperConfig,
     private readonly sink: RunSink,
+    private readonly options: RunnerOptions = {},
   ) {
     this.#effectiveDelayMs = config.requestDelayMs;
+    this.#recorder = sink.onArtifact ? new DebugRecorder(this.#runLabel, sink.onArtifact.bind(sink)) : null;
+  }
+
+  /** The recorder namespaces artifacts; the sink supplies the real run id. */
+  get #runLabel(): string {
+    return this.options.runId ?? "run";
+  }
+
+  /** True once the test-mode record cap is reached. */
+  get #atItemLimit(): boolean {
+    const limit = this.options.maxItems;
+    return limit !== undefined && this.#totalItems >= limit;
   }
 
   /** Cooperative cancellation: closing the context aborts in-flight navigation. */
@@ -52,6 +83,11 @@ export class ScrapeRunner {
     return this.#stopRequested;
   }
 
+  /** Either kind of "we are done here": a user stop, or the test-mode cap. */
+  get #shouldHalt(): boolean {
+    return this.#stopRequested || this.#atItemLimit;
+  }
+
   async run(): Promise<ScrapeSummary> {
     const { config } = this;
     const plan: ExtractionPlan = {
@@ -64,6 +100,9 @@ export class ScrapeRunner {
     if (browserManager.executablePath) {
       this.sink.log("debug", `Using Chromium at ${browserManager.executablePath}`);
     }
+
+    // Refuse internal targets before a browser is even launched.
+    await assertPublicUrl(config.url, "Target URL");
 
     await this.#applyRobotsPolicy();
     if (this.#stopRequested) return this.#summary();
@@ -102,7 +141,11 @@ export class ScrapeRunner {
     }
 
     if (this.#stopRequested) this.sink.log("warn", "Scraping stopped by user");
-    else this.sink.log("success", `Scraping completed — ${this.#totalItems} item(s) from ${this.#pagesProcessed} page(s)`);
+    else if (this.#reachedItemLimit) {
+      this.sink.log("success", `Test run complete — stopped at ${this.#totalItems} item(s) from ${this.#pagesProcessed} page(s)`);
+    } else {
+      this.sink.log("success", `Scraping completed — ${this.#totalItems} item(s) from ${this.#pagesProcessed} page(s)`);
+    }
 
     return this.#summary();
   }
@@ -139,7 +182,12 @@ export class ScrapeRunner {
     }
   }
 
+  /** Both gates a page URL must pass: the SSRF guard, then robots.txt. */
   async #isUrlAllowed(url: string): Promise<boolean> {
+    if (!(await isRequestUrlAllowed(url))) {
+      this.sink.log("error", `Blocked (points at an internal or private address): ${url}`);
+      return false;
+    }
     if (!this.config.respectRobotsTxt) return true;
     const policy = await getRobotsPolicy(url, this.config.userAgent);
     return isAllowedByPolicy(policy, url);
@@ -182,7 +230,7 @@ export class ScrapeRunner {
     const batchSize = Math.max(1, Math.min(concurrency, maxPages));
 
     for (let offset = 0; offset < targets.length; offset += batchSize) {
-      if (this.#stopRequested) break;
+      if (this.#shouldHalt) break;
       const batch = targets.slice(offset, offset + batchSize);
       const before = this.#totalItems;
 
@@ -226,7 +274,7 @@ export class ScrapeRunner {
       let pageNumber = 1;
       let currentUrl = this.config.url;
 
-      while (pageNumber <= maxPages && !this.#stopRequested) {
+      while (pageNumber <= maxPages && !this.#shouldHalt) {
         if (pageNumber === 1) {
           const ok = await this.#gotoWithRetry(page, currentUrl, pageNumber);
           if (!ok) return;
@@ -234,7 +282,7 @@ export class ScrapeRunner {
 
         const before = this.#totalItems;
         await this.#extractInto(page, pageNumber, plan, { validate: pageNumber === 1 });
-        if (this.#stopRequested || pageNumber >= maxPages) break;
+        if (this.#shouldHalt || pageNumber >= maxPages) break;
 
         if (pagination.stopWhenNoNewItems !== false && this.#totalItems === before) {
           this.sink.log("info", "No new items on this page — stopping pagination");
@@ -314,7 +362,7 @@ export class ScrapeRunner {
       if (!(await this.#gotoWithRetry(page, this.config.url, 1))) return;
       await this.#extractInto(page, 1, plan, { validate: true });
 
-      for (let round = 1; round <= scrollTimes && !this.#stopRequested; round++) {
+      for (let round = 1; round <= scrollTimes && !this.#shouldHalt; round++) {
         const before = this.#totalItems;
         const grew = await page
           .evaluate(async () => {
@@ -350,6 +398,7 @@ export class ScrapeRunner {
     const page = await this.#context.newPage();
     page.setDefaultTimeout(this.config.timeoutMs);
     page.setDefaultNavigationTimeout(this.config.timeoutMs);
+    this.#recorder?.attach(page);
     return page;
   }
 
@@ -407,6 +456,16 @@ export class ScrapeRunner {
       this.#pagesFailed++;
       this.#consecutiveFailures++;
       const message = `Page ${pageNumber} failed: ${errorMessage(error)}`;
+
+      // Capture the evidence before the page is torn down.
+      await this.#recorder?.captureFailure({
+        page,
+        label: `Page ${pageNumber} failed`,
+        pageNumber,
+        pageUrl: url,
+      });
+      if (this.#recorder) this.sink.log("debug", "Captured a screenshot and HTML snapshot for debugging");
+
       if (pageNumber === 1) throw new Error(message);
       this.sink.log("error", message);
       return false;
@@ -440,7 +499,23 @@ export class ScrapeRunner {
           "warn",
           `Item selector "${plan.itemSelector}" matched nothing. The page may render later — try pagination mode "scroll", a "wait for selector", or a different selector.`,
         );
+        await this.#recorder?.captureFailure({
+          page,
+          label: `Item selector matched nothing on page ${pageNumber}`,
+          pageNumber,
+          pageUrl: page.url(),
+        });
       }
+    }
+
+    if (this.#recorder && (this.options.alwaysCaptureReport ?? false) && pageNumber === 1) {
+      await this.#recorder.captureSelectorReport({
+        page,
+        itemSelector: plan.itemSelector,
+        itemSelectorKind: plan.itemSelectorKind,
+        fields: plan.fields,
+        pageNumber,
+      });
     }
 
     const pageUrl = page.url();
@@ -455,13 +530,21 @@ export class ScrapeRunner {
     });
 
     const duplicates = outcome.items.length - fresh.length;
-    if (fresh.length > 0) this.sink.saveItems(pageNumber, pageUrl, fresh);
+
+    // A test run must stop on exactly the record it was asked for, not at the
+    // end of whatever page happened to contain it.
+    const limit = this.options.maxItems;
+    const kept = limit === undefined ? fresh : fresh.slice(0, Math.max(0, limit - this.#totalItems));
+    if (limit !== undefined && kept.length < fresh.length) this.#reachedItemLimit = true;
+
+    if (kept.length > 0) this.sink.saveItems(pageNumber, pageUrl, kept);
 
     this.#pagesProcessed++;
-    this.#totalItems += fresh.length;
+    this.#totalItems += kept.length;
+    if (limit !== undefined && this.#totalItems >= limit) this.#reachedItemLimit = true;
 
     const suffix = duplicates > 0 ? ` (${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped)` : "";
-    this.sink.log(fresh.length > 0 ? "success" : "info", `Found ${fresh.length} item(s) on page ${pageNumber}${suffix}`);
+    this.sink.log(kept.length > 0 ? "success" : "info", `Found ${kept.length} item(s) on page ${pageNumber}${suffix}`);
 
     this.sink.onProgress({
       pagesProcessed: this.#pagesProcessed,
@@ -470,7 +553,7 @@ export class ScrapeRunner {
       pagesPlanned: this.#plannedPages(),
     });
 
-    return fresh.length;
+    return kept.length;
   }
 
   #summary(): ScrapeSummary {
@@ -479,6 +562,7 @@ export class ScrapeRunner {
       pagesProcessed: this.#pagesProcessed,
       pagesFailed: this.#pagesFailed,
       stopped: this.#stopRequested,
+      reachedItemLimit: this.#reachedItemLimit,
     };
   }
 }

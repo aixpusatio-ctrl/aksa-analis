@@ -1,5 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type LaunchOptions } from "playwright-core";
 import { existsSync } from "node:fs";
+import { isRequestUrlAllowed } from "../security/ssrf.ts";
 
 /**
  * Chromium binaries that containers commonly pre-install. When one of these
@@ -74,15 +75,22 @@ class BrowserManager {
     context.setDefaultTimeout(options.timeoutMs);
     context.setDefaultNavigationTimeout(options.timeoutMs);
 
-    if (options.blockResources) {
-      // Images, media and fonts are never part of the extracted data, so
-      // dropping them is both faster and lighter on the target site.
-      await context.route("**/*", (route) => {
-        const type = route.request().resourceType();
-        if (type === "image" || type === "media" || type === "font") return route.abort();
-        return route.continue();
-      });
-    }
+    // Every navigation is re-checked here, not just the URL we were handed:
+    // a redirect can land on a private address the pre-flight check never saw.
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const type = request.resourceType();
+
+      if (options.blockResources && (type === "image" || type === "media" || type === "font")) {
+        return route.abort();
+      }
+
+      if (type === "document" || type === "subdocument") {
+        if (!(await isRequestUrlAllowed(request.url()))) return route.abort("blockedbyclient");
+      }
+
+      return route.continue();
+    });
 
     this.#contexts++;
     context.on("close", () => {

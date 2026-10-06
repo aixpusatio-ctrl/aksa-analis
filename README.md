@@ -1,17 +1,33 @@
-# Web Scraper
+# AKSA Analis
 
-A working web scraper with a modern dashboard — not a mockup. Configure a target
-through a form, run it against JavaScript-heavy pages with Playwright, watch the
-log stream in realtime, then browse and export the data.
+A visual web data extraction platform. Build a scraper by clicking elements on
+the page, run it against JavaScript-heavy sites with Playwright, watch the log
+stream in realtime, then browse and export the data.
 
 Built on **Bun** end to end: Bun serves the API, bundles the React client, and
 runs the SQLite database through `bun:sqlite`.
 
 ```
-React + TypeScript + Tailwind v4   →   Bun.serve (API + SSE + bundler)
-                                        ├── Playwright (Chromium)
-                                        └── Drizzle ORM → SQLite (bun:sqlite)
+                        ┌──────────────────────────────────────────┐
+  Browser               │  Bun.serve — API, SSE and client bundler │
+  ┌───────────────┐     ├──────────────────────────────────────────┤
+  │ React + TS    │◄───►│  routes/     HTTP surface                │
+  │ Tailwind v4   │ SSE │  inspector/  snapshot · detect · preview │
+  │               │     │  scraper/    engine · browser · robots   │
+  │ ┌───────────┐ │     │              extract · debug             │
+  │ │ snapshot  │ │     │  services/   scrapers · runs · export    │
+  │ │ (iframe,  │◄┼─────┤  security/   SSRF guard                  │
+  │ │  picker)  │ │     │  storage/    artifacts (swappable)       │
+  │ └───────────┘ │     │  database/   Drizzle schema              │
+  └───────────────┘     └───────┬──────────────────┬───────────────┘
+                                │                  │
+                         Playwright (Chromium)   SQLite (bun:sqlite)
 ```
+
+The **inspector** renders a target page in Playwright, strips it of anything
+executable, and serves the result from our own origin. That is what makes
+click-to-pick possible: the dashboard can iframe it and talk to it, which no
+cross-origin page would allow.
 
 ---
 
@@ -41,7 +57,7 @@ export CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium
 | `bun run build` | Static client bundle in `dist/`, for hosting the UI separately |
 | `bun run demo` | Sample website to scrape, on `:3100` |
 | `bun run demo:seed` | Create six ready-made scrapers for the demo site |
-| `bun run test` | Unit tests (in-memory database, never touches your data) |
+| `bun run test` | Tests (in-memory database, never touches your data) |
 | `bun run typecheck` | `tsc --noEmit` across server, client and shared types |
 | `bun run db:generate` | Regenerate SQL migrations after a schema change |
 | `bun run db:migrate` | Apply pending migrations |
@@ -57,6 +73,9 @@ Copy `.env.example` to `.env`. Everything has a working default.
 | `DATABASE_PATH` | `./data/scraper.db` | SQLite file; `:memory:` for a throwaway database |
 | `CHROMIUM_EXECUTABLE_PATH` | auto-detected | Use an existing Chromium instead of downloading one |
 | `CHROMIUM_NO_SANDBOX` | off (auto when running as root) | Adds `--no-sandbox`, needed in most containers |
+| `ARTIFACTS_PATH` | `./data/artifacts` | Where screenshots and snapshots are stored |
+| `ALLOW_PRIVATE_NETWORK` | on in development, **off in production** | Lets the scraper reach loopback and private addresses. See [Security](#security) |
+| `ALLOWED_PRIVATE_HOSTS` | — | Comma-separated hosts exempt from the SSRF guard, e.g. `localhost:3100` |
 
 ---
 
@@ -166,6 +185,76 @@ curl -X POST localhost:3000/api/scrape -H 'content-type: application/json' -d '{
 
 ---
 
+## Building a scraper visually
+
+Open **Visual builder**, paste a URL, and press *Open preview*. The page is
+rendered server-side, sanitized, and shown in an iframe you can click.
+
+```
+URL  →  Open preview  →  click an element  →  Add as field  →  Save
+                              │
+                              └─ or press Auto detect and accept the schema
+```
+
+Clicking an element gives you:
+
+- a selector matching **just that element**, and one matching **all similar**
+  siblings, each with a live match count
+- the **repeating ancestor** when the element sits in a list — one click turns
+  it into the item selector, and field selectors then become relative to it
+- a **suggested field type** (an `<img>` becomes `image`, an `<a>` becomes
+  `link`) and a preview of the value that would be extracted
+- a **highlight** button that outlines every match in the preview
+
+Every selector stays editable by hand, in CSS or XPath, and the **live preview
+table** under the builder re-resolves as you type — it runs against the page
+you are looking at, so there is no round trip.
+
+### Auto detect
+
+*Auto detect* looks for the repeated structure on the page and guesses what its
+parts mean: headings become `title`, currency-shaped text becomes `price`,
+`<time datetime>` becomes a date read from the attribute, `data-*` attributes on
+the record become fields of their own. It reports a confidence per field and a
+sample value, lists other repeating structures it found as alternatives, and
+never applies anything without **Accept / Edit / Reject**.
+
+On the bundled demo site it finds `article.product` with 12 fields.
+
+### Test run
+
+**Test run** scrapes a handful of records — five by default — so a
+configuration can be checked in a second rather than by starting a full crawl.
+It stops on the exact record asked for, even mid-page, and always leaves a
+**selector report** behind. Test runs are tagged in History and can be filtered
+out with `?mode=normal`.
+
+### Debugger
+
+When a page fails, or an item selector matches nothing, the run captures what
+it saw, so a failure can be understood without reproducing it:
+
+| Captured | Why |
+| --- | --- |
+| **Screenshot** | What the browser actually rendered, which is often not what you expected |
+| **HTML snapshot** | The DOM at the moment of failure |
+| **Console log** | Page errors and warnings |
+| **Network errors** | Failed requests and 4xx/5xx responses |
+| **Selector report** | Per-field match counts — *expected 6, found 0* |
+
+The selector report is the one that usually answers the question outright:
+
+```
+Item selector .product                           6 items found
+
+Field    Selector            Found   Sample
+name     .product-name       6 / 6   Basalt Webcam 1
+price    .product-price      6 / 6   $56.99
+stock    .in-stock           0 / 6   nothing matched
+```
+
+---
+
 ## Configuring a scraper
 
 A scraper is a **target URL**, an **item selector** matching the element that
@@ -268,6 +357,26 @@ The UI is a client of this API; nothing is hidden from it.
 | `GET` | `/api/stats` | Dashboard aggregates |
 | `GET` | `/api/health` | Runtime and browser diagnostics |
 
+### Visual inspector
+
+| Method | Path | |
+| --- | --- | --- |
+| `POST` | `/api/inspector/snapshots` | Render a page and store an inert copy |
+| `GET` | `/api/inspector/snapshots/:id/page` | The snapshot, served same-origin under a strict CSP |
+| `POST` | `/api/inspector/test-selector` | Count and sample what a selector matches |
+| `POST` | `/api/inspector/preview` | Run a field plan against the live page |
+| `POST` | `/api/inspector/detect` | Guess the page's repeated structure |
+
+### Test runs and debugging
+
+| Method | Path | |
+| --- | --- | --- |
+| `POST` | `/api/scrapers/:id/test` | Capped run of a saved scraper (`maxItems`, default 5) |
+| `POST` | `/api/scrape/test` | Capped run of an unsaved configuration |
+| `GET` | `/api/runs/:id/artifacts` | Debug artifacts captured for a run |
+| `GET` | `/api/runs/:id/artifacts/:artifactId` | One artifact's content |
+| `GET` | `/api/history?mode=normal\|test\|all` | Filter test runs in or out |
+
 ### Realtime (SSE)
 
 ```js
@@ -311,19 +420,25 @@ curl -X POST localhost:3000/api/scrape -H 'content-type: application/json' -d '{
 apps/
   demo/                   Sample site to scrape, plus ready-made presets
   web/                    React client
-    components/           UI kit, DataTable, LogConsole, ScraperForm, FieldEditor
-    pages/                Dashboard, Scrapers, Editor, Results, History, Settings
-    hooks/                useRunStream (SSE), useTheme, useRouter, useAsync, useToast
+    components/
+      inspector/          PickPanel, DetectModal
+      ui/                 Buttons, cards, modals, toasts, states
+      ...                 DataTable, LogConsole, ScraperForm, FieldEditor, DebugPanel
+    pages/                Dashboard, Scrapers, Editor, VisualBuilder, Results, History, Settings
+    hooks/                usePicker, useRunStream (SSE), useTheme, useRouter, useAsync, useToast
     services/             API client
   server/
-    routes/               HTTP routes and the SSE endpoint
-    scraper/              browser, engine, extract, pagination, robots, manager
+    routes/               HTTP surface, SSE, inspector endpoints
+    inspector/            serialize, picker-script, detect, service
+    scraper/              browser, engine, extract, robots, manager, debug
+    security/             SSRF guard
+    storage/              Artifact store behind an interface (local disk today)
     database/             Drizzle schema, client, migrations runner
     services/             scrapers, runs, results, export, settings
     utils/                http, errors, async, validation, event bus
 packages/shared/          Types and defaults shared by client and server
 drizzle/                  Generated SQL migrations
-tests/                    Unit tests
+tests/                    Unit and integration tests
 ```
 
 The **shared types** package is what keeps the two halves honest: the form, the
@@ -341,8 +456,66 @@ produce is a field the engine can run.
 - **Scaling out** — `ScrapeRunner` has no global state and `RunSink` is a plain
   interface, so moving runs onto a queue or separate workers means implementing
   that interface against your transport rather than rewriting the engine.
+- **Another storage backend** — implement `ArtifactStore`
+  (`apps/server/storage/types.ts`) and return it from `storage/index.ts`.
+  Nothing that writes screenshots or snapshots needs to change.
 
 ---
+
+## Security
+
+### SSRF protection
+
+The scraper and the inspector both fetch URLs chosen by whoever is using the
+app, from inside the server's network. Every target passes through a guard
+(`apps/server/security/ssrf.ts`) that blocks:
+
+- loopback (`127.0.0.0/8`, `::1`, `localhost`)
+- private ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
+- link-local, including the **cloud metadata endpoint** `169.254.169.254`
+- carrier-grade NAT, multicast and reserved ranges
+- internal hostnames such as `metadata.google.internal` and any `.internal` name
+- IPv4-mapped IPv6 (`::ffff:127.0.0.1`) and non-http(s) schemes
+
+A hostname is resolved first, and **every** address it maps to must be public —
+a name resolving to both a public and a private address is treated as a DNS
+rebinding attempt. Navigation requests are re-checked inside the browser
+context, so a redirect cannot land somewhere the pre-flight check never saw.
+
+`ALLOW_PRIVATE_NETWORK` defaults to **on in development** (so the bundled demo
+site on `localhost:3100` works) and **off in production**. The startup banner
+always states which policy is active. To scrape an internal host from a
+deployed instance, exempt it explicitly rather than disabling the guard:
+
+```bash
+ALLOWED_PRIVATE_HOSTS=intranet.example.com:8080
+```
+
+### The snapshot is served from our origin
+
+Click-to-pick needs the preview to be same-origin, which means third-party HTML
+is served from our domain. Two independent layers keep that safe:
+
+1. **Sanitization** — `<script>`, `<iframe>`, `<object>`, every `on*` handler
+   and every `javascript:` URL are removed when the snapshot is serialized.
+2. **Content-Security-Policy** — `default-src 'none'` with a per-response nonce,
+   so only the picker script can execute even if sanitization missed something.
+   `base-uri` is pinned to the target's origin, `form-action` is `'none'`.
+
+Snapshots are scratch data: they expire after an hour and are capped in number.
+
+### Other measures
+
+- Every numeric setting is clamped server-side, so a crafted payload cannot
+  turn into a request flood against a target site.
+- Field names are restricted to characters that survive a CSV header.
+- Artifact keys are sanitized and confined to the store root, so a key can
+  never escape it.
+- The browser runs headless with no debugging port exposed.
+
+Not yet implemented, and on the roadmap: authentication, authorization, rate
+limiting and secret encryption. **Do not expose this on a public network as it
+stands.**
 
 ## Responsible use
 
@@ -364,6 +537,23 @@ This tool is for **publicly accessible data only**.
 You are responsible for how you use this.
 
 ---
+
+## Roadmap
+
+Phase 1 (visual building and debugging) is done. The rest is planned in order,
+each phase leaving the app runnable:
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| **1 — Core UX** | Visual builder, selector inspector, auto detect, test run, debugger | ✅ done |
+| **2 — Workflow** | Action workflow (click, type, scroll before extraction), data transformation pipeline, incremental scraping, dataset management | planned |
+| **3 — Automation** | Scheduler, change monitoring, keyword monitoring, webhooks, notifications | planned |
+| **4 — Intelligence** | AI-assisted schema generation behind a provider abstraction | planned |
+| **5 — Scale** | Queue and workers, resource monitoring, PostgreSQL and object-storage abstractions | planned |
+
+The architecture already anticipates the later phases: `RunSink` decouples the
+engine from persistence (phase 5), `ArtifactStore` is an interface (phase 5),
+and every scrape is a `Run` with a frozen config snapshot (phases 2–3).
 
 ## License
 
